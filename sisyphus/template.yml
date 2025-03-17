@@ -1,0 +1,228 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Configuration for Raspberry Pi devices
+
+Resources:
+  # SSM Agent Document
+  RPiInstall:
+    Type: AWS::SSM::Document
+    Properties:
+      
+      DocumentFormat: YAML
+      DocumentType: Command
+      Content: |
+        schemaVersion: '2.2'
+        description: 
+        parameters: {}
+        mainSteps:
+          - action: aws:runShellScript
+            name: runCommand
+            inputs:
+              runCommand:
+                - "sudo apt update && sudo apt upgrade -y"
+                - "sudo mkdir /home/ssm-user"
+                - "cd /home/ssm-user && curl https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip -o awscliv2.zip"
+                - "unzip awscliv2.zip && sudo ./aws/install"
+                - "sudo rm -rf awscliv2.zip"
+                - "aws s3 cp s3://{repo}/rpizero.sh /home/ssm-user"
+                - "sudo chmod +x /home/ssm-user/rpizero.sh"
+                - "sudo /home/ssm-user/rpizero.sh"
+                - "sudo rm -rf /home/ssm-user/rpizero.sh"
+  
+  # SSM Flutter Pi Document    
+  Flutterpi:
+    Type: AWS::SSM::Document
+    Properties:
+      DocumentFormat: YAML
+      DocumentType: Command
+      Content: |
+        schemaVersion: '2.2'
+        description: "Update flutter app on raspberry pi zero"
+        parameters: {}
+        mainSteps:
+          - action: aws:runShellScript
+            name: runCommand
+            inputs:
+              runCommand:
+                - "sudo mkdir /home/ssm-user/tmp"
+                - "aws s3 cp s3://{repo}/flutterbundle.zip /home/ssm-user/tmp/flutterbundle.zip"
+                - "sudo unzip /home/ssm-user/tmp/flutterbundle.zip -d /home/ssm-user/tmp"
+                - "sudo pkill flutter-pi"
+                - "sudo rm -rf /home/ssm-user/flutterapp && sudo mkdir /home/ssm-user/flutterapp"
+                - "sudo mv /home/ssm-user/tmp/build /home/ssm-user/flutterapp"
+                - "sudo rm -rf /home/ssm-user/tmp"
+
+  # IAM Role
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: RPiLambdaRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      
+  HybridActivationsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AmazonEC2RunCommandRoleForManagedInstances 
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+
+  # IAM Policy
+  LambdaPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: LambdaBasicExecutionRoleAndAmazonSSMFullAccess
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - cloudwatch:PutMetricData
+              - ds:CreateComputer
+              - ds:DescribeDirectories
+              - ec2:DescribeInstanceStatus
+              - logs:*
+              - ssm:*
+              - ec2messages:*
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - iam:CreateServiceLinkedRole
+            Resource: "arn:aws:iam::*:role/aws-service-role/ssm.amazonaws.com/AWSServiceRoleForAmazonSSM*"
+            Condition:
+              StringLike:
+                iam:AWSServiceName: ssm.amazonaws.com
+          - Effect: Allow
+            Action:
+              - iam:DeleteServiceLinkedRole
+              - iam:GetServiceLinkedRoleDeletionStatus
+            Resource: "arn:aws:iam::*:role/aws-service-role/ssm.amazonaws.com/AWSServiceRoleForAmazonSSM*"
+          - Effect: Allow
+            Action:
+              - ssmmessages:CreateControlChannel
+              - ssmmessages:CreateDataChannel
+              - ssmmessages:OpenControlChannel
+              - ssmmessages:OpenDataChannel
+            Resource: "*"
+          - Effect: Allow
+            Action: 
+              - logs:CreateLogGroup
+            Resource: "arn:aws:logs:us-east-1:*:*"
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: "arn:aws:logs:us-east-1:*:log-group:/aws/lambda/RunDocument:*"
+      Roles:
+        - !Ref LambdaRole
+  
+  HybridActivationsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: ssmpolicy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:*
+              - s3-object-lambda:*
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - ssm:DescribeAssociation
+              - ssm:GetDeployablePatchSnapshotForInstance
+              - ssm:GetDocument
+              - ssm:DescribeDocument
+              - ssm:GetManifest
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:ListAssociations
+              - ssm:ListInstanceAssociations
+              - ssm:PutInventory
+              - ssm:PutComplianceItems
+              - ssm:PutConfigurePackageResult
+              - ssm:UpdateAssociationStatus
+              - ssm:UpdateInstanceAssociationStatus
+              - ssm:UpdateInstanceInformation
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - ssmmessages:CreateControlChannel
+              - ssmmessages:CreateDataChannel
+              - ssmmessages:OpenControlChannel
+              - ssmmessages:OpenDataChannel
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - ec2messages:AcknowledgeMessage
+              - ec2messages:DeleteMessage
+              - ec2messages:FailMessage
+              - ec2messages:GetEndpoint
+              - ec2messages:GetMessages
+              - ec2messages:SendReply
+            Resource: "*"
+      Roles:
+      - !Ref HybridActivationsRole
+
+  # Lambda Function
+  RunDocumentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: RunDocument
+      CodeUri: src/tag-ssm/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.12
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 60
+      MemorySize: 128
+      Environment:
+        Variables:
+          RPiInstall: !Ref RPiInstall
+
+  # EventBridge Rule
+  NewRPiRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: NewRPi
+      EventPattern:
+        source:
+          - "aws.ssm"
+        detail-type:
+          - "SSM Managed Instance Registration"
+      Targets:
+        - Arn: !GetAtt RunDocumentFunction.Arn
+          Id: RunDocument
+          InputTransformer:
+            InputPathsMap:
+              instance-id: "$.detail.instance-id"
+            InputTemplate: |
+              {
+                "instance-id": <instance-id>
+              }
+
+  # Lambda Permission for EventBridge
+  LambdaPermissionEventBridge:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt RunDocumentFunction.Arn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt NewRPiRule.Arn
+
+  # S3 Bucket for Flutter
+  S3BucketFlutter:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      BucketName: !Sub ${AWS::StackName}-flutter-bucket

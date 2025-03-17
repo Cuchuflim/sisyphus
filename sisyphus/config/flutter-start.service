@@ -1,0 +1,12 @@
+[Unit]
+Description=Start Flutter App on Raspberry Pi
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/flutter-pi --release /home/ssm-user/flutterapp/build/flutter_assets
+WorkingDirectory=/home/ssm-user/flutterapp/build
+Restart=always
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=multi-user.target
