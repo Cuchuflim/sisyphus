@@ -17,5 +17,5 @@ jobs:
            role-to-assume: ${{ secrets.IAM_ROLE }}
            aws-region: us-east-1
            
-      - run: sam build --use-container -/-guided
+      - run: sam build --use-container
       - run: sam deploy --config-file config/config.toml --no-confirm-changeset
