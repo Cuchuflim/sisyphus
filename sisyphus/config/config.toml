@@ -1,8 +1,8 @@
 version = 0.1
 [default.deploy.parameters]
-stack_name = "rpi-ssm-stack"
+stack_name = "my-stack"
 region = "us-east-1"
 capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND"
 resolve_s3 = true
-s3_prefix = "rpi-ssm"
+s3_prefix = "ssm"
 disable_rollback = false
